@@ -1,0 +1,227 @@
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SOL Incinerator — Multi-Wallet Manager</title>
+<link rel="stylesheet" href="styles.css" />
+
+<div id="app">
+  <header class="topbar">
+    <div class="brand">
+      <span class="flame">🔥</span>
+      <div>
+        <h1>SOL Incinerator</h1>
+        <p class="sub">Local multi-wallet manager · close accounts · sell/burn tokens · sweep &amp; fund SOL</p>
+      </div>
+    </div>
+    <div class="netstate">
+      <span id="connDot" class="dot off"></span>
+      <span id="connText">not connected</span>
+    </div>
+  </header>
+
+  <div class="warnbar">
+    ⚠️ Private keys stay in <b>this browser only</b> — nothing is ever uploaded. Anyone with your keys controls your funds.
+    Use a dedicated machine and a private RPC. Verify every transaction on Solscan.
+  </div>
+
+  <!-- CONNECTION -->
+  <section class="card">
+    <h2>1 · Connection</h2>
+    <div class="row">
+      <label class="grow">
+        RPC endpoint (mainnet — use a private RPC like Helius/QuickNode; public RPC is rate-limited)
+        <input id="rpcUrl" type="text" placeholder="https://mainnet.helius-rpc.com/?api-key=..." spellcheck="false" />
+      </label>
+      <button id="connectBtn" class="primary">Connect</button>
+    </div>
+    <div class="row">
+      <label class="grow">
+        Jupiter swap API base (for selling tokens)
+        <input id="jupBase" type="text" value="https://quote-api.jup.ag/v6" spellcheck="false" />
+      </label>
+    </div>
+  </section>
+
+  <!-- VAULT -->
+  <section class="card">
+    <h2>2 · Encrypted vault</h2>
+    <p class="hint">Optional. Encrypt your imported keys in this browser with a password (AES-GCM). Leave locked to keep keys in memory only for this session.</p>
+    <div class="row">
+      <label class="grow">
+        Vault password
+        <input id="vaultPass" type="password" placeholder="password" autocomplete="off" />
+      </label>
+      <button id="vaultUnlock">Unlock / Load</button>
+      <button id="vaultSave">Save encrypted</button>
+      <button id="vaultLock" class="ghost">Lock (wipe memory)</button>
+    </div>
+    <div id="vaultState" class="hint"></div>
+  </section>
+
+  <!-- IMPORT -->
+  <section class="card">
+    <h2>3 · Import wallets</h2>
+    <p class="hint">Paste one private key per line. Accepted formats: <b>base58</b> (Phantom/Solflare export) or <b>JSON byte array</b> <code>[12,34,...]</code>. Optionally add a label after a comma: <code>KEY,my-label</code></p>
+    <textarea id="keyInput" rows="5" spellcheck="false" placeholder="4Nd7...base58key,wallet-1&#10;[123,45,67,...],wallet-2"></textarea>
+    <div class="row">
+      <button id="importBtn" class="primary">Add wallets</button>
+      <label class="fileimport ghost">
+        Import JSON file…
+        <input id="fileInput" type="file" accept=".json,.txt" hidden />
+      </label>
+      <span class="grow"></span>
+      <button id="clearAllBtn" class="danger ghost">Remove all wallets</button>
+    </div>
+    <div id="importState" class="hint"></div>
+  </section>
+
+  <!-- WALLETS -->
+  <section class="card">
+    <h2>4 · Wallets</h2>
+    <div class="row">
+      <label class="grow">
+        Main / destination wallet (receives swept SOL, funds gas)
+        <select id="mainSelect"></select>
+      </label>
+      <button id="refreshBtn">Refresh balances</button>
+    </div>
+    <div class="tablewrap">
+      <table id="walletTable">
+        <thead>
+          <tr>
+            <th><input type="checkbox" id="selectAll" title="select all" /></th>
+            <th>Label</th>
+            <th>Address</th>
+            <th class="num">SOL</th>
+            <th class="num">Token accts</th>
+            <th class="num">Reclaimable</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="walletBody">
+          <tr class="empty"><td colspan="7">No wallets loaded.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div id="totals" class="totals"></div>
+  </section>
+
+  <!-- CONTROL WALLET -->
+  <section class="card">
+    <h2>5 · Control wallet <span class="hint">(main funding + withdrawal hub)</span></h2>
+    <p class="hint">Generate a fresh wallet to be your deposit / control hub — or use whichever row is set <b>MAIN</b> above. Deposit SOL to it, fund the fleet from it, sweep back into it, and withdraw out to any address.</p>
+    <div class="row">
+      <button id="genBtn" class="primary">✨ Generate new control wallet</button>
+      <span class="grow"></span>
+    </div>
+    <div id="noMain" class="hint" style="margin-top:8px">No main wallet yet — generate one, or import keys above and pick one as MAIN.</div>
+
+    <div id="controlPanel" style="display:none;margin-top:14px">
+      <div class="ctrlgrid">
+        <div class="ctrlinfo">
+          <label>Deposit / control address</label>
+          <div class="addrbig"><span id="ctrlAddr" class="mono"></span>
+            <button id="ctrlCopy" class="ghost small">copy</button></div>
+          <div class="ctrlbal">Balance: <b id="ctrlBal">—</b> SOL
+            <button id="ctrlRefresh" class="ghost small">refresh</button></div>
+          <div class="ctrlbtns">
+            <button id="revealBtn" class="ghost small">Reveal / back up private key</button>
+            <button id="saveVaultQuick" class="ghost small">Save to vault</button>
+          </div>
+          <div id="revealBox" class="revealbox" style="display:none">
+            <label>base58 secret key (import into Phantom / Solflare)</label>
+            <textarea id="revealB58" rows="2" readonly spellcheck="false"></textarea>
+            <label>JSON byte array (id.json format)</label>
+            <textarea id="revealJson" rows="2" readonly spellcheck="false"></textarea>
+            <p class="hint warn-text">⚠️ Anyone with this key owns the wallet. Back it up offline — never share it or paste it into a website.</p>
+          </div>
+        </div>
+        <div class="ctrlqr">
+          <img id="ctrlQr" alt="deposit address QR" />
+          <span class="hint">scan to deposit</span>
+        </div>
+      </div>
+
+      <div class="withdraw">
+        <h3>💸 Withdraw SOL</h3>
+        <p class="hint">Send SOL from the control wallet out to any external address.</p>
+        <div class="row">
+          <label class="grow">Destination address
+            <input id="wdDest" type="text" spellcheck="false" placeholder="recipient Solana address" /></label>
+          <label>Amount (SOL)
+            <input id="wdAmount" type="number" step="0.001" min="0" placeholder="0.0" /></label>
+          <label class="chk" style="align-self:flex-end;padding-bottom:9px"><input id="wdMax" type="checkbox" /> max</label>
+          <button id="withdrawBtn" class="primary">Withdraw</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- OPERATIONS -->
+  <section class="card ops">
+    <h2>6 · Operations <span class="hint">(runs on <b>selected</b> wallets — main wallet is used as destination)</span></h2>
+
+    <div class="opgrid">
+      <div class="opbox">
+        <h3>💧 Fund gas</h3>
+        <p class="hint">Send SOL from the main wallet to every selected wallet so they can pay fees.</p>
+        <label>SOL per wallet <input id="fundAmount" type="number" value="0.003" step="0.001" min="0" /></label>
+        <button id="fundBtn" class="primary">Distribute SOL → selected</button>
+      </div>
+
+      <div class="opbox">
+        <h3>🔎 Scan tokens</h3>
+        <p class="hint">List all SPL token accounts (balances + empty) for selected wallets.</p>
+        <button id="scanBtn">Scan selected</button>
+      </div>
+
+      <div class="opbox">
+        <h3>💱 Sell tokens</h3>
+        <p class="hint">Swap all non-zero token balances to SOL via Jupiter. Unsellable tokens are skipped.</p>
+        <label>Slippage (bps) <input id="slippage" type="number" value="100" step="10" min="1" /></label>
+        <button id="sellBtn" class="primary">Sell all → SOL</button>
+      </div>
+
+      <div class="opbox">
+        <h3>🗑️ Close accounts</h3>
+        <p class="hint">Close <b>empty</b> token accounts and reclaim their rent SOL (~0.002 each).</p>
+        <button id="closeBtn" class="primary">Incinerate empty accounts</button>
+      </div>
+
+      <div class="opbox danger">
+        <h3>🔥 Burn tokens</h3>
+        <p class="hint"><b>Destructive.</b> Permanently destroys token balances so their accounts can be closed. Use only for junk/unsellable tokens.</p>
+        <label class="chk"><input id="burnConfirm" type="checkbox" /> I understand these tokens are gone forever</label>
+        <button id="burnBtn" class="danger">Burn all balances</button>
+      </div>
+
+      <div class="opbox">
+        <h3>🧹 Sweep SOL</h3>
+        <p class="hint">Send all SOL (minus fee buffer) from selected wallets to the main wallet.</p>
+        <button id="sweepBtn" class="primary">Consolidate SOL → main</button>
+      </div>
+    </div>
+
+    <div class="fullrun">
+      <h3>⚡ Full reclaim (selected wallets)</h3>
+      <p class="hint">Runs in order: Sell → (optional Burn leftovers) → Close empty accounts → Sweep SOL to main.</p>
+      <label class="chk"><input id="fullBurn" type="checkbox" /> also burn tokens Jupiter can't sell</label>
+      <label class="chk"><input id="fullSweep" type="checkbox" checked /> sweep SOL to main at the end</label>
+      <button id="fullRunBtn" class="primary big">Run full reclaim</button>
+    </div>
+  </section>
+
+  <!-- LOG -->
+  <section class="card">
+    <div class="loghead">
+      <h2>Activity log</h2>
+      <button id="clearLog" class="ghost small">clear</button>
+    </div>
+    <div id="log" class="log"></div>
+  </section>
+
+  <footer class="foot">
+    Runs entirely in your browser. Open-source dependencies loaded from esm.sh. Not affiliated with any wallet or exchange.
+  </footer>
+</div>
+
+<script type="module" src="app.js"></script>
